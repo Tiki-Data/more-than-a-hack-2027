@@ -12,9 +12,8 @@ frame without a ball D, and smooths with a centred majority vote. v0 changes onl
      through the missing-ball frames that follow, until the ball is seen in play again.
   3. Frames outside the two halves are X (never graded), and nothing is carried across halftime.
 
-Everything else is the baseline's: the nearest-player rule and the +/-50-frame majority vote.
-The window is the published baseline's default, NOT tuned by us -- tuning it on the public window
-is exactly what the rules forbid and what baseline.py shows to mislead.
+Everything else is the baseline's: the nearest-player rule and the +/-50-frame majority vote, now
+done by the shared decoder in src/decode.py (see there for why the window is not tuned).
 
 This is deliberately crude. Approach 1 (src/approach1.py) replaces it.
 """
@@ -27,14 +26,9 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+from src.decode import A, D, H, UNKNOWN, decode  # noqa: E402
 from src.load import load_frames  # noqa: E402
 from src.submission import OUT_DIR, validate, write_submission  # noqa: E402
-
-# Params
-SMOOTH_HALF_WINDOW = 50   # frames each side; the published baseline's default, see docstring
-
-H, A, D, UNKNOWN = 0, 1, 2, -1
-LETTERS = np.array(["H", "A", "D"])
 
 
 def raw_codes(F):
@@ -49,32 +43,13 @@ def raw_codes(F):
     return codes
 
 
-def hold(codes):
-    """Fill UNKNOWN with the last known code. Before the first observation: D (not yet in play)."""
-    idx = np.where(codes != UNKNOWN, np.arange(len(codes)), -1)
-    np.maximum.accumulate(idx, out=idx)
-    return np.where(idx >= 0, codes[np.maximum(idx, 0)], D).astype(np.int8)
-
-
-def majority(codes, w):
-    """Centred majority vote over +/- w frames among H, A, D. Ties: H, then A, then D."""
-    n = len(codes)
-    counts = []
-    for c in (H, A, D):
-        cum = np.concatenate(([0], np.cumsum(codes == c)))
-        i = np.arange(n)
-        counts.append(cum[np.minimum(n, i + w + 1)] - cum[np.maximum(0, i - w)])
-    return np.argmax(np.stack(counts, axis=1), axis=1).astype(np.int8)  # first max wins
-
-
-def predict(F, w=SMOOTH_HALF_WINDOW):
-    labels = np.full(len(F["frame"]), "X", dtype="<U1")
+def predict(F):
+    """One-hot evidence from raw_codes (UNKNOWN -> 0,0,0), decoded by the shared decoder."""
     raw = raw_codes(F)
-    for h in (1, 2):
-        idx = np.flatnonzero(F["half"] == h)
-        lo, hi = idx[0], idx[-1] + 1  # each half is one contiguous block
-        labels[lo:hi] = LETTERS[majority(hold(raw[lo:hi]), w)]
-    return labels
+    probs = np.zeros((len(raw), 3))
+    known = raw != UNKNOWN
+    probs[known, raw[known]] = 1.0
+    return decode(probs, F["half"])
 
 
 if __name__ == "__main__":
