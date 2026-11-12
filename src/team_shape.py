@@ -6,8 +6,10 @@
 
 The idea: a team with the ball spreads out, long and wide, to make passing lanes. A team without
 it squeezes up compact. So when Barcelona look more spread out than Athletic, that is evidence
-Barcelona have the ball. This matters most when the ball itself is missing, which it is on 41% of
-graded frames -- the players are still tracked.
+Barcelona have the ball. Pressing points the same way: opponents close down the ball carrier, so
+the team whose most-surrounded player is under more pressure probably has it. This matters most
+when the ball itself is missing, which it is on 41% of graded frames -- the players are still
+tracked.
 
 team_shape.csv follows the team format, frame,H,A,D, as probabilities: H is the chance Barcelona
 have the ball, A = 1 - H, D = 0. H stays between about 0.27 and 0.73, and 0.5,0.5 means no opinion.
@@ -33,10 +35,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 from games import GAME, GAMES  # noqa: E402
-from src.load import load_frames  # noqa: E402
+from src.load import CACHE_DIR, CACHE_VERSION  # noqa: E402
 from src.submission import OUT_DIR  # noqa: E402
 
 # Params
+CACHE_PATH = os.path.join(CACHE_DIR, "{}_frames_v{}.npz".format(GAME, CACHE_VERSION))  # [N1]
 EVIDENCE_DIR = os.path.join(OUT_DIR, "evidence")
 SHAPE_CSV = os.path.join(EVIDENCE_DIR, "team_shape.csv")
 BALL_CSV = os.path.join(EVIDENCE_DIR, "ball_short_gaps_filled.csv")
@@ -49,11 +52,22 @@ SECOND_HALF_KICKOFF = 113742               # [N2] frames before this in the 2nd 
 MIN_OUTFIELD_PLAYERS = 6                   # [N4] fewer than this visible -> no opinion
 SPREAD_PERCENTILES = (10, 90)              # [N5] ignore the most extreme player at each end
 SMOOTHING_FRAMES = FPS                     # [N6] average over 1 s either side
-FEATURE_WEIGHTS = {"length": 1.0, "width": 1.0, "line": 0.0}   # [N7] line is switched off
+FEATURE_WEIGHTS = {"length": 1.0, "width": 1.0,  # [N7]
+                   "line": 0.0,                   # [N7] switched off: points the wrong way
+                   "pressure": 0.0}               # [N12] switched off: too weak, lowers the score
+PRESSURE_RADIUS = 5.0                      # [N12] metres; opponents further away add no pressure
 MAX_SCORE = 1.0                            # [N8] about 73% at most -- shape is weak evidence
 MAX_GAP_TO_FILL = 12                       # [N9] frames, just under 0.5 s
 MAX_BALL_SPEED = 40.0                      # [N9] m/s, faster than any real shot
 NEAR_BALL = 1.0                            # [N10] metres, only used by the checks
+
+
+def load_cached_frames():
+    """The shared table exactly as src/load.py cached it, so we use the same data as everyone. [N1]"""
+    if not os.path.isfile(CACHE_PATH):
+        raise FileNotFoundError(CACHE_PATH + " not found -- run `python src/load.py` first")
+    with np.load(CACHE_PATH) as cached:
+        return {key: cached[key] for key in cached.files}
 
 
 def frames_we_judge(F):
@@ -126,6 +140,24 @@ def measure_team_shape(forward_x, y):
     return shape
 
 
+def pressure_on_most_pressed_player(own_xy, opponent_xy):
+    """Per frame: the pressure on whichever of this team's players is most closed down. [N12]
+
+    Pressure on one player = sum over opponents of (1 - distance / PRESSURE_RADIUS), for opponents
+    inside the radius: an opponent at 0 m adds 1, at 2.5 m adds 0.5, at 5 m or more nothing.
+    Opponents press the ball carrier, so the team whose player is most surrounded probably has it.
+    """
+    pressure = np.full(own_xy.shape[:2], np.nan)                       # (frames, own slots)
+    for slot in range(own_xy.shape[1]):
+        distance = np.linalg.norm(opponent_xy - own_xy[:, slot:slot + 1], axis=2)
+        closeness = np.clip(1 - distance / PRESSURE_RADIUS, 0, None)  # NaN (not tracked) stays NaN
+        pressure[:, slot] = np.nansum(closeness, axis=1)
+    pressure[np.isnan(own_xy[:, :, 0])] = np.nan                       # this player not tracked
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)                # nobody visible -> NaN
+        return np.nanmax(pressure, axis=1)
+
+
 def rolling_mean(values, half_width):
     """Centred moving average over +/- half_width frames that skips NaNs."""
     ok = ~np.isnan(values)
@@ -153,7 +185,14 @@ def shape_score(F, judged):
     barca_shape = measure_team_shape(forward_x[:, barca], y[:, barca])
     athletic_shape = measure_team_shape(forward_x[:, athletic], y[:, athletic])
 
-    print("\n[N7] typical Barcelona-minus-Athletic difference (m)")
+    xy = F["players_xy"].astype(np.float64)
+    barca_shape["pressure"] = pressure_on_most_pressed_player(xy[:, barca], xy[:, athletic])
+    athletic_shape["pressure"] = pressure_on_most_pressed_player(xy[:, athletic], xy[:, barca])
+    # length is NaN where a team has too few players visible [N4]; pressure gets no opinion there too.
+    for shape in (barca_shape, athletic_shape):
+        shape["pressure"][np.isnan(shape["length"])] = np.nan
+
+    print("\n[N7] typical Barcelona-minus-Athletic difference (metres; pressure has no unit)")
     scaled = {}
     for feature in FEATURE_WEIGHTS:
         difference = barca_shape[feature] - athletic_shape[feature]
@@ -270,7 +309,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-diagnostics", action="store_true", help="skip the checks")
     args = parser.parse_args()
 
-    F = load_frames()
+    F = load_cached_frames()
     judged = frames_we_judge(F)
     check_attack_direction(F, judged)
 
@@ -284,6 +323,6 @@ if __name__ == "__main__":
     os.makedirs(EVIDENCE_DIR, exist_ok=True)
     barca_probability = 1 / (1 + np.exp(-score))       # score is log-odds -> P(Barcelona has it)
     write_csv(pd.DataFrame({"frame": F["frame"], "H": barca_probability, "A": 1 - barca_probability,
-                            "D": np.zeros(len(score))}), SHAPE_CSV)
+                            "D": 0.5}), SHAPE_CSV)
     write_csv(pd.DataFrame({"frame": F["frame"], "ball_x": ball[:, 0], "ball_y": ball[:, 1],
                             "filled": filled.astype(np.int8)}), BALL_CSV)
