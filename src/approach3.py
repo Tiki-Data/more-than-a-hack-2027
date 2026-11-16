@@ -6,9 +6,10 @@
 What it does
 ------------
 1. CLEAN THE TAGS. Keep the SET PIECES (throw-ins, corners, goal kicks, free kicks, kick-offs) and
-   the GOALS. Drop the phantom goal near 31' (GOALS at frame 57283) and the kick-off tagged after
-   it (frame 62012): no goal was scored, so no kick-off happened. The stoppage itself is real (the
-   ball is missing for ~2.5 minutes), and step 4 still catches it from the tracking.
+   the GOALS. The "goal" near 31' (GOALS at frame 57283) is not a goal: it is the COOLING BREAK.
+   Play stopped, but no goal was scored, so the kick-off tagged after it (frame 62012) is dropped
+   too. The break itself becomes a restart of its own: dead from when the ball disappears (a gap
+   of 60 s+, the players walking to the bench) to the first time the ball is seen moving after it.
    The penalty is tagged as a free kick; it is a restart like any other, so it stays.
 
 2. FIND THE EXACT RESTART FRAME. Tag times are 35 s phase windows, not moments. In each window we
@@ -59,10 +60,14 @@ H, A, D = 0, 1, 2
 SIDE_CODE = {"H": H, "A": A}
 
 # --- Step 1: tag cleaning -----------------------------------------------------------------------
-# The phantom goal near 31' and the kick-off tagged after it (TEAM_PLAN / APPROACHES_DETAILED). The
-# 2.5 minutes after it have no ball at all, so it was a stoppage (likely a review), not a goal.
-PHANTOM_GOAL_FRAME = 57283
+# The "goal" tagged near 31' is the cooling break, and the kick-off tagged after it never happened.
+# Tracking agrees: the ball is missing for 2.3 minutes and the median player speed falls to
+# 0.2-0.6 m/s (players standing at the bench), against 1.37 m/s in normal play.
+COOLING_BREAK_TAG_FRAME = 57283
 PHANTOM_KICKOFF_FRAME = 62012
+# A cooling break lasts about 90 s to 3 minutes, so it is the first ball-missing gap of 60 s+ after
+# the tag. No open-play dropout of the tracker comes close to that and also follows this tag.
+COOLING_MIN_GAP = 60 * 25
 
 # --- Step 2: restart frame ----------------------------------------------------------------------
 # The ball "moves" for a restart when it goes faster than walking pace with it: 3 m/s. Same value
@@ -135,9 +140,9 @@ def row(winner, p):
 # ---------------------------------------------------------------------------------------------
 
 def clean_tags(tags):
-    """(set_pieces, goals), sorted by frame, phantom goal and its kick-off removed."""
+    """(set_pieces, goals), sorted by frame. The cooling-break "goal" and its kick-off removed."""
     sp = tags[(tags.code == "SET PIECES") & (tags.start_frame != PHANTOM_KICKOFF_FRAME)]
-    goals = tags[(tags.code == "GOALS") & (tags.start_frame != PHANTOM_GOAL_FRAME)]
+    goals = tags[(tags.code == "GOALS") & (tags.start_frame != COOLING_BREAK_TAG_FRAME)]
     return (sp.sort_values("start_frame").reset_index(drop=True),
             goals.sort_values("start_frame").reset_index(drop=True))
 
@@ -254,6 +259,21 @@ def goal_moment(F, goal, lo, kickoff):
     return lo + int(idx[-1]) + 1 if len(idx) else lo
 
 
+def cooling_break(F, tag_frame):
+    """(dead_start, restart, how): the first 60 s+ ball-missing gap after the tag, and the first
+    frame after it with the ball seen moving (within SEARCH_AFTER), else the gap's end."""
+    missing = ~F["ball_seen"][tag_frame:]
+    edge = np.diff(np.r_[0, missing.astype(np.int8), 0])
+    for a, b in zip(np.flatnonzero(edge == 1), np.flatnonzero(edge == -1)):
+        if b - a >= COOLING_MIN_GAP:
+            a, b = tag_frame + int(a), tag_frame + int(b)
+            moving = F["ball_seen"][b:b + SEARCH_AFTER] & (
+                F["ball_speed"][b:b + SEARCH_AFTER] > RESTART_SPEED_MS)
+            idx = np.flatnonzero(moving)
+            return a, (b + int(idx[0]) if len(idx) else b), ("first_moving" if len(idx) else "tag")
+    return None
+
+
 def weak_stretches(F):
     """Ball-missing gaps of WEAK_MIN_GAP+ frames inside a half with slow players."""
     with warnings.catch_warnings():
@@ -310,6 +330,15 @@ def restarts(F, set_pieces, goals):
                      "type": kind, "tag_frame": int(tag.start_frame), "how": how,
                      "team_how": team_how, "dead_start": min(start, r), "strong": strong,
                      "last_touch_says": "HA"[check] if check is not None else ""})
+
+    found = cooling_break(F, COOLING_BREAK_TAG_FRAME)
+    if found is not None:
+        start, r, how = found
+        team = nearest_team(F, r)
+        rows.append({"frame": r, "team": "HA"[team] if team is not None else "N",
+                     "type": "Cooling Break", "tag_frame": COOLING_BREAK_TAG_FRAME, "how": how,
+                     "team_how": "nearest", "dead_start": start, "strong": True,
+                     "last_touch_says": ""})
     table = pd.DataFrame(rows).sort_values("frame").reset_index(drop=True)
     # Two tags for one stoppage (detected within 2 s of each other): keep the first.
     dup = table.frame.diff().fillna(np.inf) < 2 * FPS
