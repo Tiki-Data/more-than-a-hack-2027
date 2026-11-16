@@ -230,7 +230,8 @@ def dead_start_walkback(F, live, kind, r, max_len, floor):
     A fast ball AT the restart spot is not live play: it is the ball being tossed or rolled to the
     taker (seen on 5 restarts whose stoppage otherwise came out at 0.5-1.5 s). Free kicks have no
     spot, so nothing is excluded for them."""
-    lo = max(floor, r - max_len)
+    # floor is the previous restart; tags are processed in tag order, so it can lie after r.
+    lo = min(max(floor, r - max_len), r)
     x, y = F["ball_xy"][lo:r, 0], F["ball_xy"][lo:r, 1]
     at_spot = in_spot(kind, x, y) if kind != "Free Kick" else np.zeros(r - lo, dtype=bool)
     idx = np.flatnonzero(live[lo:r] & ~at_spot)
@@ -304,10 +305,13 @@ def restarts(F, set_pieces, goals):
         half = int(F["half"][min(r, len(F["half"]) - 1)])
         check = None
 
+        before = goals[goals.start_frame < tag.start_frame]
+        if kind == "Kick Off (After Goal)" and len(before) == 0:
+            continue  # a kick-off after a goal with no goal tag: nothing to anchor it to
         if kind == "Kick Off (After Goal)" and how != "spot":
             # Not seen leaving the centre spot: the goal before it is not confirmed. Keep the
             # stoppage it marks, from the tracking alone.
-            goal = goals[goals.start_frame < tag.start_frame].iloc[-1]
+            goal = before.iloc[-1]
             found = long_stoppage(F, int(goal.start_frame), int(tag.end_frame) + SEARCH_AFTER)
             if found is None:
                 continue
@@ -319,7 +323,7 @@ def restarts(F, set_pieces, goals):
                          "dead_start": start, "strong": True, "last_touch_says": ""})
             continue
         if kind == "Kick Off (After Goal)":
-            goal = goals[goals.start_frame < r].iloc[-1]
+            goal = before.iloc[-1]
             team = A if goal.side == "H" else H  # the team that conceded kicks off
             team_how = "conceded"
             lo = max(int(goal.start_frame), rows[-1]["frame"] if rows else 0)
