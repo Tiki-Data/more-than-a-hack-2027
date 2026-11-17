@@ -18,6 +18,7 @@ Run everything from the repo root. Data goes in `data/tactical/` (see [data/READ
 | `python src/v0.py` | writes and validates the safety-net submission `out/v0.csv` |
 | `python src/approach1.py` | writes `out/scores/approach1.csv` (evidence) and `out/approach1.csv` (submission) |
 | `python src/approach1.py --stats` | prints the tracking measurements behind approach 1's constants |
+| `python src/hmm.py [out/scores/<piece>.csv]` | decodes a score file with the HMM (default approach1) -> `out/hmm_<piece>.csv` |
 
 ### Checking and scoring
 | Command | What it does |
@@ -40,8 +41,8 @@ from src.submission import write_scores, read_scores, labels_to_scores, write_su
 write_scores("out/scores/<piece>.csv", probs)   # probs: (199319, 3) H/A/D, rows sum to 1 or 0,0,0
 probs = read_scores("out/scores/<piece>.csv")    # checked, 0,0,0 -> uniform, renormalised
 
-from src.decode import decode
-labels = decode(probs, F["half"])  # stand-in decoder until P2's HMM; same signature
+from src.hmm import decode         # the HMM; src.decode has the old majority-vote stand-in
+labels = decode(probs, F["half"])  # same signature for both
 ```
 
 ## Files
@@ -54,6 +55,7 @@ labels = decode(probs, F["half"])  # stand-in decoder until P2's HMM; same signa
 | [decode.py](../src/decode.py) | Turns per-frame H/A/D probabilities into labels (vote, hold, majority smoothing); P2's HMM replaces it. |
 | [v0.py](../src/v0.py) | The safety-net submission: the baseline with "missing ball = keep the owner" and "ball out = D". |
 | [approach1.py](../src/approach1.py) | Rule-based possession: control radius, confirm before switching, backdate the switch. |
+| [hmm.py](../src/hmm.py) | Approach 2: H/A/D HMM with minimum durations, Viterbi per half; drop-in replacement for `decode.decode`. |
 
 ### Our docs (`docs/`)
 | File | One sentence |
