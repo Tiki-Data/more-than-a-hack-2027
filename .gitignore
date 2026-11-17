@@ -62,6 +62,3 @@ __pycache__/
 venv/
 env/
 .DS_Store
-
-# Generated submissions -- rebuilt by the pipeline, uploaded via the form
-out/
