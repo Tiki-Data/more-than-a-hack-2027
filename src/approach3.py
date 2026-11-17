@@ -37,6 +37,13 @@ What it does
    After each restart, the restarting team gets 0.8 for RESTART_TEAM_FRAMES.
    Everything else is 0,0,0: no opinion.
 
+5. STOPPAGES THE TAGS MISSED. The tags hold about half the stoppages a match has (only 5 free
+   kicks, 26 throw-ins). Where the tracking sees the ball go out -- or loses it at a line -- and no
+   tag or weak stretch accounts for it, the restart is the next live frame at least 2 s later with
+   a quiet second before it. Strong when the ball was seen out and play restarts from that line's
+   spot; weak when it was seen out but play resumes elsewhere, or only lost at the line and
+   restarted from the spot.
+
 Constants were set from football reasoning or from this match's tracking and tags (no labels),
 never from the public 5 minutes. `python src/approach3.py` prints the checks behind them.
 """
@@ -126,6 +133,20 @@ RESTART_TEAM_FRAMES = 2 * FPS
 STRONG_D = 0.85
 WEAK_D = 0.65
 RESTART_TEAM_P = 0.8
+# --- Step 5: stoppages the tags missed ------------------------------------------------------------
+# The tags hold 59 set pieces for the whole match -- 26 throw-ins, 10 goal kicks, 5 free kicks --
+# where a LaLiga match has ~110-130 stoppages (40-50 throw-ins, 15-20 goal kicks, 25-30 free kicks).
+# So the tracking looks for the ball going out where no tag accounts for it. A ball seen out for
+# 1-2 frames is tracker noise (2 of the 58 out episodes); 3 frames is a ball that stayed out.
+MIN_OUT_FRAMES = 3
+# A ball last seen within 2 m of a line before a 3 s+ gap may have gone out unseen. Only claimed if
+# play then restarts from that line's restart spot.
+LINE_NEAR_M = 2.0
+LOST_AT_LINE_GAP = 3 * FPS
+# Untagged stoppages last from 2 s (the quickest throw-in, as hmm.MIN_DEAD_FRAMES) to the longest
+# any kind of restart gets in MAX_DEAD.
+UNTAGGED_MIN = 2 * FPS
+UNTAGGED_MAX = 60 * FPS
 
 
 def row(winner, p):
@@ -356,6 +377,70 @@ def restarts(F, set_pieces, goals):
     return table[~dup].reset_index(drop=True), int(dup.sum())
 
 
+def runs_of(mask):
+    """(start, end) of every run of True in mask, end exclusive."""
+    edge = np.diff(np.r_[0, mask.astype(np.int8), 0])
+    return list(zip(np.flatnonzero(edge == 1), np.flatnonzero(edge == -1)))
+
+
+def untagged(F, table, weak):
+    """Rows for restarts.csv: ball-outs that no tag or weak stretch already accounts for.
+
+    Two ways in: the ball SEEN out of the pitch for MIN_OUT_FRAMES+, or the ball LOST within
+    LINE_NEAR_M of a line for LOST_AT_LINE_GAP+. The restart is the first live frame after it,
+    within UNTAGGED_MAX and the same half. If that frame is at the restart spot of the line the
+    ball left by (touchline: throw-in; goal line: goal kick or corner), it is a restart: strong when
+    the ball was seen out, weak when it was only lost there. A ball seen out but back in play away
+    from a restart spot (the tracker missed the restart) is weak; one only lost at the line is not
+    claimed at all -- a ball lost near the touchline in live play is common."""
+    live = live_frames(F)
+    half = F["half"]
+    covered = np.zeros(len(half), dtype=bool)
+    for t in table.itertuples():
+        covered[t.dead_start:t.frame + 1] = True
+    for a, b in weak:
+        covered[a:b] = True
+
+    candidates = [(a, True) for a, b in runs_of(F["ball_out"] & (half > 0)) if b - a >= MIN_OUT_FRAMES]
+    for a, b in runs_of(~F["ball_seen"] & (half > 0)):
+        if b - a < LOST_AT_LINE_GAP or a == 0 or not F["ball_seen"][a - 1]:
+            continue
+        x, y = F["ball_xy"][a - 1]
+        if min(x, PITCH_L - x, y, PITCH_W - y) < LINE_NEAR_M:
+            candidates.append((a, False))
+
+    rows = []
+    for start, seen_out in sorted(candidates):
+        if covered[max(0, start - FPS):start + FPS].any():
+            continue
+        # The restart: a live frame at least UNTAGGED_MIN after the ball left, with a quiet second
+        # before it (QUIET_BEFORE, as for tagged restarts). Moving balls in between are the ball
+        # bouncing back off the boards or being tossed to the taker, not play.
+        lo, hi = start + UNTAGGED_MIN, min(len(half), start + UNTAGGED_MAX)
+        idx = [f for f in np.flatnonzero(live[lo:hi] & (half[lo:hi] == half[start])) + lo
+               if not live[f - QUIET_BEFORE:f].any()]
+        if not idx:
+            continue
+        r = int(idx[0])
+        if covered[start:r + 1].any():
+            continue  # runs into a stoppage already accounted for: that one owns its restart
+        x, y = F["ball_xy"][start] if seen_out else F["ball_xy"][start - 1]
+        goal_line = min(x, PITCH_L - x) < min(y, PITCH_W - y)
+        kinds = ("Goal Kick", "Corner Kick") if goal_line else ("Throw-in",)
+        bx, by = F["ball_xy"][r]
+        at_spot = any(in_spot(k, np.array([bx]), np.array([by]))[0] for k in kinds)
+        if not at_spot and not seen_out:
+            continue
+        team = nearest_team(F, r)
+        rows.append({"frame": r, "team": "HA"[team] if team is not None else "N",
+                     "type": "Untagged ({})".format("seen out" if seen_out else "lost at line"),
+                     "tag_frame": -1, "how": "spot" if at_spot else "first_moving",
+                     "team_how": "nearest", "dead_start": start,
+                     "strong": bool(seen_out and at_spot), "last_touch_says": ""})
+        covered[start:r + 1] = True
+    return rows
+
+
 def predict(F, table, weak):
     """(n, 3) H/A/D evidence."""
     n = len(F["frame"])
@@ -404,6 +489,8 @@ def main():
     set_pieces, goals = clean_tags(load_tags())
     table, n_dup = restarts(F, set_pieces, goals)
     weak = weak_stretches(F)
+    extra = untagged(F, table, weak)
+    table = pd.concat([table, pd.DataFrame(extra)]).sort_values("frame").reset_index(drop=True)
     probs = predict(F, table, weak)
 
     path = write_scores(os.path.join(SCORES_DIR, "approach3.csv"), probs)

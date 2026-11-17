@@ -13,7 +13,7 @@ python src/glue.py      # -> out/Tiki-Data.csv, validated, sha256 printed
 ```
 
 Expected sha256 of `out/Tiki-Data.csv`:
-`ff193efcc3b2637cc7893f7cf722b032560f1dc03cfd94643089f89e7e2eff93`
+`cdc8f16fdc7d6e896765c342275c8dd25e35fa9413731d07050e1293a315db54`
 
 | our code | what it does |
 |---|---|
