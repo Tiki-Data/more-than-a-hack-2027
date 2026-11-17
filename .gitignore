@@ -65,3 +65,7 @@ env/
 
 # -- Tiki-Data internals -----------------------------
 docs/*
+
+# Frame-level ball positions (approach 4 side output): derived tracking data, must never be public
+out/ball_short_gaps_filled.csv
+out/evidence/

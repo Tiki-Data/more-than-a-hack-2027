@@ -11,15 +11,19 @@ the team whose most-surrounded player is under more pressure probably has it. Th
 when the ball itself is missing, which it is on 41% of graded frames -- the players are still
 tracked.
 
-approach4.csv follows the team format, frame,H,A,D, as probabilities: H is the chance Barcelona
-have the ball, A = 1 - H, D = 0. H stays between about 0.27 and 0.73, and 0.5,0.5 means no opinion.
+approach4.csv follows the team format, frame,H,A,D, as probabilities: D = 1/3 always (shape has no
+opinion on dead balls) and H/A share the other 2/3 by the chance Barcelona have the ball, which
+stays between about 0.27 and 0.73. 1/3,1/3,1/3 means no opinion.
 Shape changes over seconds, so this says WHO probably has the ball, not WHEN it changed hands.
 
 ball_short_gaps_filled.csv is the ball in metres with tiny gaps (up to 0.5 s) filled in with a
 straight line.
 
-The reasoning behind every constant is in TEAM_SHAPE_NOTES.md (team-hq repo, working_docs/),
-under the [N#] tag shown next to it here. Everything printed is an aggregate, never rows of data.
+The reasoning behind every constant is in the comment next to it, under an [N#] tag that the
+diagnostics printed by this script refer back to. The [N10] direction check compares each feature
+with the team of the player nearest the ball (within 1 m) -- a proxy made by code, never by hand,
+used only to see whether a feature points the right way. Everything printed is an aggregate, never
+rows of data.
 """
 
 import argparse
@@ -321,7 +325,9 @@ if __name__ == "__main__":
     print()
     os.makedirs(SCORES_DIR, exist_ok=True)
     barca_probability = 1 / (1 + np.exp(-score))       # score is log-odds -> P(Barcelona has it)
-    write_csv(pd.DataFrame({"frame": F["frame"], "H": barca_probability, "A": 1 - barca_probability,
-                            "D": 0.5}), SHAPE_CSV)
+    # Shape says nothing about dead balls: D keeps its uniform 1/3 and H/A split the rest, so rows
+    # sum to 1 and a 50/50 frame is exactly uniform, i.e. no opinion for the glue.
+    write_csv(pd.DataFrame({"frame": F["frame"], "H": 2 / 3 * barca_probability,
+                            "A": 2 / 3 * (1 - barca_probability), "D": 1 / 3}), SHAPE_CSV)
     write_csv(pd.DataFrame({"frame": F["frame"], "ball_x": ball[:, 0], "ball_y": ball[:, 1],
                             "filled": filled.astype(np.int8)}), BALL_CSV)

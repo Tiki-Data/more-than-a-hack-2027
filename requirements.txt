@@ -1,10 +1,11 @@
-# Everything the evaluation needs. Deliberately two lines.
+# Everything our pipeline (src/) and the evaluation need, pinned to the versions that produced
+# out/Tiki-Data.csv. Python 3.11.
 #
-# The scorer is dependency-light on purpose: no sklearn, no torch, nothing that pins a Python
-# version. It runs under 3.8 and 3.11 alike and produces identical output, so "it scored
-# differently on my machine" is not a conversation anyone has to have.
+#     pip install -r requirements.txt
 #
-# Optional tooling -- the ATD loader and anything that opens the video -- lives in
-# requirements-starter.txt.
-numpy
-pandas
+# Optional tooling for the organisers' starter notebooks -- the ATD loader and anything that opens
+# the video -- lives in requirements-starter.txt and is not needed to reproduce the submission.
+numpy==2.4.6
+pandas==3.1.1
+python-dateutil==4.0.0
+tzdata==2026.6

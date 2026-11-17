@@ -1,6 +1,6 @@
 """The glue: every piece's evidence, combined and decoded into the submission. One command.
 
-    python src/glue.py               # runs the pieces, combines, decodes -> out/submission.csv
+    python src/glue.py               # runs the pieces, combines, decodes -> out/Tiki-Data.csv
     python src/glue.py --no-build    # reuse the score files already in out/scores/
 
 1. BUILD. Runs each piece in PIECES (python src/<piece>.py), which writes out/scores/<piece>.csv.
@@ -10,11 +10,9 @@
    floored at hmm.PROB_FLOOR so no single piece can veto a state, then renormalised. A piece's
    "no idea" row is uniform, so it adds nothing.
 3. DECODE with the HMM (src/hmm.py). It masks frames outside the two halves to X.
-4. WRITE out/submission.csv, validate it, and print its sha256 so two runs can be compared.
+4. WRITE out/<TEAM>.csv -- named after the team, because the scoreboard names each row after the
+   uploaded file -- validate it, and print its sha256 so two runs can be compared.
 
-Team shape (src/team_shape.py) is not in PIECES yet: it writes to out/evidence/ and gives D = 0 on
-every frame, which in a product of experts would rule dead balls out. It goes in once it writes a
-score file to the spec in docs/TEAM_PLAN.md.
 """
 
 import argparse
@@ -33,14 +31,22 @@ from src.load import load_frames  # noqa: E402
 from src.submission import OUT_DIR, SCORES_DIR, read_scores, validate, write_submission  # noqa: E402
 
 # Params
+TEAM = "Tiki-Data"
+
 # Piece -> weight. Equal weights: each piece already calibrates its own confidence (approach 1 at
 # 0.8 per control frame, approach 3 at 0.85 / 0.65 on dead stretches) and the two speak mostly on
 # different frames -- approach 1 when a player has the ball, approach 3 when nobody does -- so
-# neither needs to be scaled against the other. Not tuned: the public window is too small to tune
-# on and is not allowed to be used for it.
+# neither needs to be scaled against the other.
+# Approach 4 (team shape) speaks on every frame but is averaged over +/- 1 s, so it cannot place a
+# change more finely than that 2 s window. At 1/3 its strongest opinion (0.73 vs 0.27) needs about
+# 2.5 s of steady disagreement to pay for a change of possession on its own (see hmm.py: switch
+# ~7 nats, EMISSION_WEIGHT 1/3) -- longer than its window, so it tips blind stretches but never
+# outvotes the ball.
+# None of these was tuned: the public window is too small to tune on and is not allowed to be.
 PIECES = {
     "approach1": 1.0,
     "approach3": 1.0,
+    "approach4": 1.0 / 3.0,
 }
 
 
@@ -74,7 +80,7 @@ if __name__ == "__main__":
         build()
     F = load_frames()
     labels = decode(combine(), F["half"])
-    path = write_submission(os.path.join(OUT_DIR, "submission.csv"), labels)
+    path = write_submission(os.path.join(OUT_DIR, TEAM + ".csv"), labels)
     print("wrote", os.path.relpath(path, ROOT), "\n")
     describe(F, labels)
     print()

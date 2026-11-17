@@ -1,3 +1,34 @@
+# Team Tiki-Data — our submission
+
+This is team **Tiki-Data**'s fork of the challenge repository. Our approach, the assets we used,
+our possession rules and limitations are in the technical document, **[Tiki-Data.md](Tiki-Data.md)**.
+
+**Reproduce the submission** (Python 3.11, data bundle unpacked into `data/` per
+[data/README.md](data/README.md) — the data is not in this repository):
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python src/glue.py      # -> out/Tiki-Data.csv, validated, sha256 printed
+```
+
+Expected sha256 of `out/Tiki-Data.csv`:
+`ff193efcc3b2637cc7893f7cf722b032560f1dc03cfd94643089f89e7e2eff93`
+
+| our code | what it does |
+|---|---|
+| [src/glue.py](src/glue.py) | the one command: runs the pieces, combines them, decodes, writes the submission |
+| [src/load.py](src/load.py) | parses the tracking into a cached per-frame table |
+| [src/approach1.py](src/approach1.py) | evidence from ball control |
+| [src/approach3.py](src/approach3.py) | dead-ball stretches and restarts, from tracking + cleaned Smart Tagging |
+| [src/approach4.py](src/approach4.py) | team-shape evidence for frames without a ball |
+| [src/hmm.py](src/hmm.py) | HMM with minimum durations, Viterbi decoding |
+| [src/submission.py](src/submission.py) | file formats and validation |
+
+Everything below this section is the organisers' original README.
+
+---
+
 # More than a Hack 2027 — Phase 1: Ball Possession
 
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
