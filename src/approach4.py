@@ -1,8 +1,8 @@
 """Team-shape evidence (approach 4): who has the ball, judged from how the two teams are spread out.
 
-    python src/team_shape.py                    # writes out/evidence/team_shape.csv
-                                                #    and out/evidence/ball_short_gaps_filled.csv
-    python src/team_shape.py --no-diagnostics   # skip the checks at the end
+    python src/approach4.py                     # -> out/scores/approach4.csv  (per-frame evidence, for the glue)
+                                                #    out/ball_short_gaps_filled.csv
+    python src/approach4.py --no-diagnostics    # skip the checks at the end
 
 The idea: a team with the ball spreads out, long and wide, to make passing lanes. A team without
 it squeezes up compact. So when Barcelona look more spread out than Athletic, that is evidence
@@ -11,7 +11,7 @@ the team whose most-surrounded player is under more pressure probably has it. Th
 when the ball itself is missing, which it is on 41% of graded frames -- the players are still
 tracked.
 
-team_shape.csv follows the team format, frame,H,A,D, as probabilities: H is the chance Barcelona
+approach4.csv follows the team format, frame,H,A,D, as probabilities: H is the chance Barcelona
 have the ball, A = 1 - H, D = 0. H stays between about 0.27 and 0.73, and 0.5,0.5 means no opinion.
 Shape changes over seconds, so this says WHO probably has the ball, not WHEN it changed hands.
 
@@ -36,13 +36,12 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 from games import GAME, GAMES  # noqa: E402
 from src.load import CACHE_DIR, CACHE_VERSION  # noqa: E402
-from src.submission import OUT_DIR  # noqa: E402
+from src.submission import OUT_DIR, SCORES_DIR  # noqa: E402
 
 # Params
 CACHE_PATH = os.path.join(CACHE_DIR, "{}_frames_v{}.npz".format(GAME, CACHE_VERSION))  # [N1]
-EVIDENCE_DIR = os.path.join(OUT_DIR, "evidence")
-SHAPE_CSV = os.path.join(EVIDENCE_DIR, "team_shape.csv")
-BALL_CSV = os.path.join(EVIDENCE_DIR, "ball_short_gaps_filled.csv")
+SHAPE_CSV = os.path.join(SCORES_DIR, "approach4.csv")
+BALL_CSV = os.path.join(OUT_DIR, "ball_short_gaps_filled.csv")
 
 FPS = GAMES[GAME]["fps"]
 PITCH_LENGTH = GAMES[GAME]["pitch"][0]
@@ -320,7 +319,7 @@ if __name__ == "__main__":
         print_checks(F, score, scaled, filled, judged)
 
     print()
-    os.makedirs(EVIDENCE_DIR, exist_ok=True)
+    os.makedirs(SCORES_DIR, exist_ok=True)
     barca_probability = 1 / (1 + np.exp(-score))       # score is log-odds -> P(Barcelona has it)
     write_csv(pd.DataFrame({"frame": F["frame"], "H": barca_probability, "A": 1 - barca_probability,
                             "D": 0.5}), SHAPE_CSV)
