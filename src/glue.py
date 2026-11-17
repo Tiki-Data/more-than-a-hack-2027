@@ -43,6 +43,9 @@ TEAM = "Tiki-Data"
 # ~7 nats, EMISSION_WEIGHT 1/3) -- longer than its window, so it tips blind stretches but never
 # outvotes the ball.
 # None of these was tuned: the public window is too small to tune on and is not allowed to be.
+# The phase tags (src/phases.py) were tried as a fourth piece and left out: on the label-free
+# masked check (analysis/masked_check.py) they add nothing on top of team shape and make the
+# decoder hold a team through turnovers.
 PIECES = {
     "approach1": 1.0,
     "approach3": 1.0,

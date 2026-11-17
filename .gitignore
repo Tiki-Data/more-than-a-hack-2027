@@ -69,3 +69,10 @@ docs/*
 # Frame-level ball positions (approach 4 side output): derived tracking data, must never be public
 out/ball_short_gaps_filled.csv
 out/evidence/
+
+# Every other pipeline output stays local too: the score files and restarts.csv are derived from
+# the licensed tracking and tagging (restarts.csv lists the tagged set pieces; phases.csv would
+# reconstruct the phase tags), and `python src/glue.py` rebuilds them in seconds. The submission
+# is the one output meant to be published.
+out/*
+!out/Tiki-Data.csv

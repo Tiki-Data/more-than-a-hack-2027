@@ -116,7 +116,8 @@ approach 1 = 1, approach 3 = 1, approach 4 = 1/3.
 - Team shape is averaged over ±1 s, so it cannot place a change more finely than a 2 s window. At
   1/3, its strongest opinion needs ~2.5 s of steady disagreement to pay for a change of possession
   by itself — longer than its window — so it can tip stretches where the ball is missing but cannot
-  outvote the ball.
+  outvote the ball. The masked check in §7 confirms it earns its place, and that 2/3 instead of 1/3
+  would change nothing beyond noise.
 
 ### 3.6 Decoding — `src/hmm.py`
 
@@ -139,7 +140,7 @@ States H, A, D, decoded per half (nothing carried across halftime; frames outsid
 | asset | used? | how |
 |---|---|---|
 | Tactical ATD (tracking) | **yes** | everything: ball, players, teams, speeds |
-| Smart Tagging | **yes** | approach 3 only: set-piece and goal tags as restart windows, cleaned by rule |
+| Smart Tagging | **yes** | approach 3: set-piece and goal tags as restart windows, cleaned by rule. The 579 phase tags were tested as possession evidence and dropped (below) |
 | Homography | no | the ATD is already in pitch coordinates; we never needed the video |
 | Tactical / broadcast video | no | own detection or ball tracking was planned (approach 5) but not built |
 | Broadcast ATD | no | it is on its own timeline, with no mapping to the tactical video |
@@ -153,6 +154,26 @@ States H, A, D, decoded per half (nothing carried across halftime; frames outsid
   combined agreement; switched off.
 - *Short ball-gap interpolation* (≤ 0.5 s): ball gaps here are long (median 10–12 s), so it fills
   only 19 graded frames. Still computed by approach 4, not used.
+- *Phase tags as possession evidence* (`src/phases.py`). The phases come in mirrored pairs — Build
+  Up for one team is Defending in Attacking Third for the other, on identical intervals — so per
+  frame only the strongest tag per team counts. Each code is calibrated against approach 1's
+  ball-control frames: Build Up 87%, Progression 85%, Attacking Transition 73%, down to Players in
+  the Box 59% (the Defending codes come out pointing at the other team, as they should). On the
+  masked check (§7) they carry possession through hidden stretches (69.7% alone) but add nothing
+  on top of team shape (72.7% vs 73.2%), and they make the decoder hold a team through turnovers:
+  wrong deviations inside same-team ball gaps rise from 24% to 27–32% and the possession count
+  falls from 249 to 208–237, depending on weight. A 20–30 s phase is too coarse to say *when*
+  possession changed. Not in the glue.
+- *Forward movement of each team* as a team-shape feature: agrees with the team in control on only
+  59% of frames, and in the 3 s after a turnover still favours the team that *lost* the ball (42%):
+  players keep running the way they were going before they turn.
+- *A stoppage detector from player movement* (speeds smoothed over ±5 s; separates code-confirmed
+  stoppages from ball-control frames with AUC 0.87): the quiet time it finds is already inside
+  approach 3's dead stretches — at most ~2 minutes of quiet time lie outside them. The stoppages we
+  still miss happen while players move normally, so it would mostly flag live play.
+- *Attacking Transition starts as change points*: at 15 of 24 the decoder already switches to the
+  tagged team within 5 s and at 2 it already had it; 7 are left, too few, from a tag that is right
+  73% of the time, to act on.
 - *A model trained on other matches* (planned with Metrica's open sample games): not done in time.
 
 ## 5. Training data
@@ -186,6 +207,22 @@ H 38.6%, A 24.6%, D 36.8%. Ball-in-play time in LaLiga is typically 52–55 minu
 puts dead ball nearer 45–50% of graded frames: we under-detect stoppages (see §8). Wherever
 approach 3 says D, the final labels keep D 99.6% of the time, so the shortfall is in detection,
 not in the decoder.
+
+**Label-free check of the pieces** (`analysis/masked_check.py`). We hide approach 1's ball-control
+evidence on every third 30 s block of each half — a third of the match made artificially blind —
+decode the rest with the HMM, and ask how often the decoded team on the hidden frames is the team
+approach 1 had seen in control there. Ball control is made by code, so this uses no labels; it
+measures how well the other pieces carry possession through a stretch with no ball.
+
+| pieces | team correct on hidden frames | wrongly called dead |
+|---|---|---|
+| ball control + dead balls | 38.2% | 39.5% |
+| + team shape (the submission) | **73.2%** | 11.6% |
+| + phase tags instead | 69.7% | 11.9% |
+| + both | 72.7% | 10.8% |
+
+Without a team signal the decoder holds the last state through a blind stretch, which after a
+stoppage means holding D; team shape fixes most of that.
 
 Public 5-minute window, for pipeline checking only (17 possessions; with 1000 bootstrap draws,
 spellF1 gaps below ~0.40 are noise):

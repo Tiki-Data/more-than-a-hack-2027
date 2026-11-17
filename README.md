@@ -24,6 +24,8 @@ Expected sha256 of `out/Tiki-Data.csv`:
 | [src/approach4.py](src/approach4.py) | team-shape evidence for frames without a ball |
 | [src/hmm.py](src/hmm.py) | HMM with minimum durations, Viterbi decoding |
 | [src/submission.py](src/submission.py) | file formats and validation |
+| [src/phases.py](src/phases.py) | phase-tag evidence: tried, measured, and left out of the submission |
+| [analysis/masked_check.py](analysis/masked_check.py) | label-free check of how well each piece carries possession when the ball is hidden |
 
 Everything below this section is the organisers' original README.
 
